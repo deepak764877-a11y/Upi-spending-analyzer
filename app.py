@@ -36,12 +36,17 @@ def get_category(description):
 
 @app.route('/')
 def home():
+    init_db()
+    
     conn = sqlite3.connect('database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     stats = cursor.execute('SELECT SUM(amount) as total_spent, COUNT(id) as total_count FROM transactions').fetchone()
     category_data = cursor.execute('SELECT category, SUM(amount) as total FROM transactions GROUP BY category').fetchall()
+    
+    top_transactions = cursor.execute('SELECT description, amount, category FROM transactions ORDER BY amount DESC LIMIT 5').fetchall()
+    
     conn.close()
     
     chart_labels = [row['category'] for row in category_data]
@@ -52,11 +57,15 @@ def home():
         stats=stats, 
         category_data=category_data,
         chart_labels=chart_labels,
-        chart_values=chart_values
+        chart_values=chart_values,
+        top_transactions=top_transactions
     )
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+
+    init_db()
+    
     file = request.files['file']
     if file:
         if not os.path.exists('uploads'):
@@ -83,5 +92,7 @@ def upload_file():
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
+    init_db()
+    app.run(debug=True)
     init_db()
     app.run(debug=True)
