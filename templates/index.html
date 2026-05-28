@@ -6,7 +6,7 @@
     <style>
         body { background-color: #f8f9fa; font-family: Arial, sans-serif; }
         .main-card { max-width: 950px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .grid-container { display: flex; gap: 30px; text-align: left; margin-top: 20px; }
+        .grid-container { display: flex; gap: 30px; }
         .left-col { flex: 4; }
         .right-col { flex: 6; }
         .feature-box { background: white; padding: 20px; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
@@ -25,7 +25,7 @@
         <p style="color: #6c757d; margin-bottom: 20px;">Upload your bank statement to visualize spending patterns</p>
         <hr>
         
-        <div class="grid-container">
+        <div class="grid-container" style="margin-top: 20px;">
             <div class="left-col">
                 <div class="feature-box">
                     <h5 style="margin-top:0; font-weight: bold;">Upload CSV Statement</h5>
@@ -99,19 +99,20 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="feature-box" style="margin-top: 20px;">
+                    <h5 style="font-weight: bold; color: #495057;">Monthly Spending</h5>
+                    <canvas id="monthlyChart" height="80"></canvas>
+                </div>
             </div>
         </div>
-
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    <input type="hidden" id="chartLabels" value='{{ chart_labels | tojson }}'>
-    <input type="hidden" id="chartValues" value='{{ chart_values | tojson }}'>
-
     <script>
-        var labels = JSON.parse(document.getElementById('chartLabels').value || '[]');
-        var values = JSON.parse(document.getElementById('chartValues').value || '[]');
+        var labels = {{ chart_labels | tojson }};
+        var values = {{ chart_values | tojson }};
         
         if (labels.length > 0) {
             var ctx = document.getElementById('spendingChart').getContext('2d');
@@ -126,8 +127,33 @@
                 },
                 options: {
                     responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        var monthLabels = {{ month_labels | tojson }};
+        var monthValues = {{ month_values | tojson }};
+        
+        if (monthLabels.length > 0) {
+            var ctx2 = document.getElementById('monthlyChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: monthLabels,
+                    datasets: [{
+                        label: 'Monthly Spending (₹)',
+                        data: monthValues,
+                        backgroundColor: '#36A2EB'
+                    }]
+                },
+                options: {
+                    responsive: true,
                     plugins: {
                         legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
                     }
                 }
             });
