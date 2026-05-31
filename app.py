@@ -1,11 +1,10 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for
 import pandas as pd
-
+from flask import Flask, render_template, request, redirect, url_for
 app = Flask(__name__)
-app.secret_key = "mysecretkey"
-
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 def init_db():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -20,93 +19,81 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-
 def get_category(description):
     desc = str(description).lower()
-    if 'zomato' in desc or 'swiggy' in desc or 'food' in desc:
+    if 'food' in desc or 'restaurant' in desc or 'swiggy' in desc or 'zomato' in desc:
         return 'Food'
-    elif 'uber' in desc or 'ola' in desc or 'petrol' in desc or 'fuel' in desc or 'hpcl' in desc or 'iocl' in desc:
+    elif 'fuel' in desc or 'travel' in desc or 'uber' in desc or 'ola' in desc:
         return 'Travel'
+    elif 'bill' in desc or 'recharge' in desc or 'electricity' in desc:
+        return 'Bills'
     elif 'amazon' in desc or 'flipkart' in desc or 'shopping' in desc:
         return 'Shopping'
-    elif 'jio' in desc or 'airtel' in desc or 'bill' in desc:
-        return 'Bills'
-    else:
-        return 'Others'
-
+    return 'Others'
 @app.route('/')
 def home():
-    init_db()
-    
     conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute("SELECT category, SUM(amount) FROM transactions GROUP BY category")
+    pie_data = cursor.fetchall()
     
-    stats = cursor.execute('SELECT SUM(amount) as total_spent, COUNT(id) as total_count FROM transactions').fetchone()
-    cats = cursor.execute('SELECT category, SUM(amount) as total FROM transactions GROUP BY category').fetchall()
-    top_transactions = cursor.execute('SELECT description, amount, category FROM transactions ORDER BY amount DESC LIMIT 5').fetchall()
-    all_raw = cursor.execute('SELECT date, amount FROM transactions').fetchall()
+    cursor.execute("SELECT strftime('%Y-%m', date) as month, SUM(amount) FROM transactions GROUP BY month")
+    bar_data = cursor.fetchall()
     
+    cursor.execute("SELECT SUM(amount) as total_spent, COUNT(id) as total_count FROM transactions")
+    stats = cursor.fetchone()
     conn.close()
     
-    monthly_dict = {}
-    for row in all_raw:
-        raw_date = str(row['date']).replace('/', '-')
-        
-        if '-' in raw_date:
-            parts = raw_date.split('-')
-            month_key = f"{parts[0]}-{parts[1]}" if len(parts[0]) == 4 else f"{parts[2]}-{parts[1]}"
-        else:
-            month_key = "Unknown"
-            
-        monthly_dict[month_key] = monthly_dict.get(month_key, 0) + abs(float(row['amount']))
-    
-    month_labels = sorted(monthly_dict.keys())
-    month_values = [monthly_dict[m] for m in month_labels]
-    
-    chart_labels = [row['category'] for row in cats]
-    chart_values = [row['total'] for row in cats]
-    
-    return render_template(
-        'index.html', 
-        stats=stats, 
-        category_data=cats,
-        chart_labels=chart_labels,
-        chart_values=chart_values,
-        top_transactions=top_transactions,
-        month_labels=month_labels,
-        month_values=month_values
-    )
-
+    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats)
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    init_db()
-    
+    if 'file' not in request.files:
+        return redirect(url_for('home'))
     file = request.files['file']
+    if file.filename == '':
+        return redirect(url_for('home'))
+    
     if file:
-        if not os.path.exists('uploads'):
-            os.makedirs('uploads')
-        file_path = os.path.join('uploads', file.filename)
-        file.save(file_path)
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+            os.makedirs(app.config['UPLOAD_FOLDER'])
         
-        df = pd.read_csv(file_path)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(filepath)
+        
+        df = pd.read_csv(filepath)
+        df.columns = df.columns.str.strip().str.lower()
         
         conn = sqlite3.connect('database.db')
         cursor = conn.cursor()
-        for index, row in df.iterrows():
-            category = get_category(row['Description'])
+        
+        for _, row in df.iterrows():
+            raw_date = row.get('date', '')
+            try:
+                date_val = pd.to_datetime(raw_date, dayfirst=True).strftime('%Y-%m-%d')
+            except:
+                date_val = raw_date
+                
+            desc_val = row.get('description', '')
+            amount_val = abs(float(row.get('amount', 0)))  # HDFC statements show debit as negative, abs() fixes it.
+            category_val = get_category(desc_val)
+            
             cursor.execute(
                 "INSERT INTO transactions (date, description, amount, category) VALUES (?, ?, ?, ?)",
-                (str(row['Date']), str(row['Description']), float(row['Amount']), category)
+                (date_val, desc_val, amount_val, category_val)
             )
+            
         conn.commit()
         conn.close()
         
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            
+        return redirect(url_for('home'))
+@app.route('/clear-data', methods=['POST'])
+def clear_data():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM transactions")
+    conn.commit()
+    conn.close()
     return redirect(url_for('home'))
-
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True)
+    app.run(debug=True) 
