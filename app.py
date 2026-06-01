@@ -2,9 +2,11 @@ import os
 import sqlite3
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for
+
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
 def init_db():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -19,6 +21,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+
 def get_category(description):
     desc = str(description).lower()
     if 'food' in desc or 'restaurant' in desc or 'swiggy' in desc or 'zomato' in desc:
@@ -30,6 +33,7 @@ def get_category(description):
     elif 'amazon' in desc or 'flipkart' in desc or 'shopping' in desc:
         return 'Shopping'
     return 'Others'
+
 @app.route('/')
 def home():
     conn = sqlite3.connect('database.db')
@@ -44,7 +48,19 @@ def home():
     stats = cursor.fetchone()
     conn.close()
     
-    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats)
+    budget_limit = 25000
+    
+    budget_status = None
+    if stats and stats[0]:
+        if stats[0] > budget_limit:
+            budget_status = 'exceeded'
+        elif stats[0] > budget_limit * 0.8:
+            budget_status = 'warning'
+        else:
+            budget_status = 'safe'
+            
+    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats, budget_limit=budget_limit, budget_status=budget_status)
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -86,6 +102,7 @@ def upload_file():
         conn.close()
         
         return redirect(url_for('home'))
+
 @app.route('/clear-data', methods=['POST'])
 def clear_data():
     conn = sqlite3.connect('database.db')
@@ -94,6 +111,7 @@ def clear_data():
     conn.commit()
     conn.close()
     return redirect(url_for('home'))
+
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True) 
+    app.run(debug=True)

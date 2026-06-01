@@ -22,6 +22,21 @@
     </nav>
 
     <div class="container">
+        
+        {% if budget_status == 'exceeded' %}
+            <div class="alert alert-danger fw-bold mb-4" role="alert">
+                ⚠️ Budget Exceeded! Total Spent: ₹{{ stats[0] }} / Limit: ₹{{ budget_limit }}
+            </div>
+        {% elif budget_status == 'warning' %}
+            <div class="alert alert-warning fw-bold mb-4" role="alert">
+                🔔 80% Budget Used! Total Spent: ₹{{ stats[0] }} / Limit: ₹{{ budget_limit }}
+            </div>
+        {% elif budget_status == 'safe' %}
+            <div class="alert alert-success fw-bold mb-4" role="alert">
+                ✅ Within Budget. Total Spent: ₹{{ stats[0] }} / Limit: ₹{{ budget_limit }}
+            </div>
+        {% endif %}
+
         <div class="row g-4">
             <div class="col-md-4">
                 <div class="feature-box">
