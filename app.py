@@ -50,16 +50,18 @@ def home():
     
     budget_limit = 25000
     
+    total_spent = stats[0] if stats and stats[0] is not None else 0
+    
     budget_status = None
-    if stats and stats[0]:
-        if stats[0] > budget_limit:
+    if total_spent > 0:
+        if total_spent > budget_limit:
             budget_status = 'exceeded'
-        elif stats[0] > budget_limit * 0.8:
+        elif total_spent > budget_limit * 0.8:
             budget_status = 'warning'
         else:
             budget_status = 'safe'
             
-    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats, budget_limit=budget_limit, budget_status=budget_status)
+    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats, total_spent=total_spent, budget_limit=budget_limit, budget_status=budget_status)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
