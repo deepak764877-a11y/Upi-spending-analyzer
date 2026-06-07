@@ -1,7 +1,10 @@
 import os
 import sqlite3
 import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, flash
+import io
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas as pdf_canvas
 
 app = Flask(__name__)
 app.secret_key = 'super-secret-key'
@@ -133,6 +136,46 @@ def clear_data():
     conn.close()
     flash('Cleared.', 'success')
     return redirect(url_for('home'))
+
+@app.route('/export-pdf')
+def export_pdf():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT SUM(amount), COUNT(id) FROM transactions")
+    stats = cursor.fetchone()
+    
+    if not stats or stats[1] == 0:
+        conn.close()
+        flash('No data to export!', 'danger')
+        return redirect(url_for('home'))
+        
+    cursor.execute("SELECT category, SUM(amount) FROM transactions GROUP BY category")
+    category_data = cursor.fetchall()
+    conn.close()
+    
+    buffer = io.BytesIO()
+    p = pdf_canvas.Canvas(buffer, pagesize=A4)
+    
+    p.setFont("Helvetica-Bold", 18)
+    p.drawString(200, 800, "UPI Spending Report")
+    
+    p.setFont("Helvetica", 12)
+    p.drawString(50, 760, f"Total Spent: Rs. {stats[0]:.2f}")
+    p.drawString(50, 740, f"Total Transactions: {stats[1]}")
+    
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(50, 700, "Category Breakdown:")
+    
+    p.setFont("Helvetica", 12)
+    y = 680
+    for row in category_data:
+        p.drawString(70, y, f"{row[0]}: Rs. {row[1]:.2f}")
+        y -= 20
+        
+    p.save()
+    buffer.seek(0)
+    
+    return send_file(buffer, as_attachment=True, download_name='spending_report.pdf', mimetype='application/pdf')
 
 if __name__ == '__main__':
     init_db()
