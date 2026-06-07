@@ -16,3 +16,12 @@ Upload your bank statement CSV and it shows you a breakdown.
 Python, Flask, SQLite, Pandas, Bootstrap, Chart.js, ReportLab
 
 ## Run it locally
+pip install flask pandas reportlab
+python app.py
+Open: http://localhost:5000
+
+## CSV format needed
+Your file should have these columns: date, description, amount
+
+## Note
+Nothing is sent to any server — all data stays on your machine.
