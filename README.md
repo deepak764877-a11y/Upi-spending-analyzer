@@ -25,3 +25,6 @@ Your file should have these columns: date, description, amount
 
 ## Note
 Nothing is sent to any server — all data stays on your machine.
+
+## Live Demo
+https://upi-spending-analyzer.onrender.com
