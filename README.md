@@ -6,11 +6,13 @@ transactions but never tells me where my money is actually going.
 Upload your bank statement CSV and it shows you a breakdown.
 
 ## What it does
-- Reads your CSV and categorizes transactions automatically
-- Shows a pie chart and monthly bar chart
-- Alerts you if you cross ₹25,000/month
-- You can download a PDF summary
-- Clear data button to start fresh
+- Upload your CSV bank statement
+- Auto-categorizes transactions into Food, Travel, Shopping, Bills, Others
+- Set your own monthly budget limit (customizable — not hardcoded)
+- Shows category-wise pie chart and monthly bar chart
+- 3-state budget alert — Safe, Warning, Exceeded
+- Download PDF report with full transaction table
+- Clear data option to start fresh
 
 ## Tech used
 Python, Flask, SQLite, Pandas, Bootstrap, Chart.js, ReportLab
