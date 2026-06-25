@@ -1,15 +1,28 @@
 import os
+import io
 import sqlite3
 import pandas as pd
-import io
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas as pdf_canvas
+from flask import Flask, render_template, request, redirect, url_for, flash, make_response
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 app = Flask(__name__)
-app.secret_key = 'super-secret-key'
-UPLOAD_FOLDER = 'uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.secret_key = 'mysecretkey'
+
+def get_category(description):
+    desc = description.lower()
+    if any(x in desc for x in ['swiggy', 'zomato', 'restaurant', 'food', 'cafe']):
+        return 'Food'
+    elif any(x in desc for x in ['electricity', 'jvvnl', 'airtel', 'jio', 'recharge', 'bill']):
+        return 'Bills'
+    elif any(x in desc for x in ['amazon', 'flipkart', 'myntra', 'shopping']):
+        return 'Shopping'
+    elif any(x in desc for x in ['uber', 'ola', 'petrol', 'fuel', 'travel', 'irctc']):
+        return 'Travel'
+    else:
+        return 'Others'
 
 def init_db():
     conn = sqlite3.connect('database.db')
@@ -19,113 +32,163 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT,
             description TEXT,
-            amount REAL,
-            category TEXT
+            category TEXT,
+            amount REAL
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY,
+            budget_limit INTEGER DEFAULT 25000
+        )
+    ''')
+    cursor.execute("INSERT OR IGNORE INTO settings (id, budget_limit) VALUES (1, 25000)")
     conn.commit()
     conn.close()
-
-def get_category(description):
-    desc = str(description).lower()
-    if 'food' in desc or 'restaurant' in desc or 'swiggy' in desc or 'zomato' in desc:
-        return 'Food'
-    elif 'fuel' in desc or 'travel' in desc or 'uber' in desc or 'ola' in desc:
-        return 'Travel'
-    elif 'bill' in desc or 'recharge' in desc or 'electricity' in desc:
-        return 'Bills'
-    elif 'amazon' in desc or 'flipkart' in desc or 'shopping' in desc:
-        return 'Shopping'
-    return 'Others'
 
 @app.route('/')
 def home():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
+    
+    cursor.execute("SELECT budget_limit FROM settings WHERE id = 1")
+    budget_limit = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT SUM(amount), COUNT(id) FROM transactions")
+    stats = cursor.fetchone()
+    total_spent = stats[0] if stats[0] else 0.0
+    
+    if total_spent > budget_limit:
+        budget_status = 'exceeded'
+    elif total_spent >= (budget_limit * 0.8):
+        budget_status = 'warning'
+    else:
+        budget_status = 'safe'
+        
     cursor.execute("SELECT category, SUM(amount) FROM transactions GROUP BY category")
     pie_data = cursor.fetchall()
     
-    cursor.execute("SELECT strftime('%Y-%m', date) as month, SUM(amount) FROM transactions GROUP BY month")
+    cursor.execute("SELECT strftime('%Y-%m', date) as month, SUM(amount) FROM transactions GROUP BY month ORDER BY month ASC")
     bar_data = cursor.fetchall()
     
-    cursor.execute("SELECT SUM(amount) as total_spent, COUNT(id) as total_count FROM transactions")
-    stats = cursor.fetchone()
     conn.close()
     
-    budget_limit = 25000
-    total_spent = stats[0] if stats and stats[0] is not None else 0
-    
-    budget_status = None
-    if total_spent > 0:
-        if total_spent > budget_limit:
-            budget_status = 'exceeded'
-        elif total_spent > budget_limit * 0.8:
-            budget_status = 'warning'
-        else:
-            budget_status = 'safe'
-            
-    return render_template('index.html', pie_data=pie_data, bar_data=bar_data, stats=stats, total_spent=total_spent, budget_limit=budget_limit, budget_status=budget_status)
+    return render_template(
+        'index.html',
+        total_spent=total_spent,
+        stats=stats,
+        budget_limit=budget_limit,
+        budget_status=budget_status,
+        pie_data=pie_data,
+        bar_data=bar_data
+    )
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    budget_limit = int(request.form.get('budget_limit', 25000))
+    
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    # Commit the budget settings update first
+    cursor.execute("UPDATE settings SET budget_limit = ? WHERE id = 1", (budget_limit,))
+    conn.commit()
+    
     if 'file' not in request.files:
+        conn.close()
+        flash('No file uploaded', 'danger')
         return redirect(url_for('home'))
+        
     file = request.files['file']
     if file.filename == '':
+        conn.close()
+        flash('No file selected', 'danger')
         return redirect(url_for('home'))
-    
-    if file:
-        if not file.filename.endswith('.csv'):
-            flash('Only CSV files allowed!', 'danger')
-            return redirect(url_for('home'))
-            
-        if not os.path.exists(app.config['UPLOAD_FOLDER']):
-            os.makedirs(app.config['UPLOAD_FOLDER'])
         
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(filepath)
+    if file and file.filename.endswith('.csv'):
+        file_path = file.filename
+        file.save(file_path)
         
         try:
-            df = pd.read_csv(filepath)
-            
-            if df.empty:
-                flash('CSV file is empty!', 'danger')
-                return redirect(url_for('home'))
-                
-            df.columns = df.columns.str.strip().str.lower()
-            required_columns = {'date', 'description', 'amount'}
-            
-            if not required_columns.issubset(df.columns):
-                flash('Missing required columns (Date, Description, Amount)!', 'danger')
-                return redirect(url_for('home'))
-                
-            conn = sqlite3.connect('database.db')
-            cursor = conn.cursor()
+            df = pd.read_csv(file_path)
+            df.columns = [c.strip().lower() for c in df.columns]
             
             for _, row in df.iterrows():
                 raw_date = row.get('date', '')
-                try:
-                    date_val = pd.to_datetime(raw_date, dayfirst=True).strftime('%Y-%m-%d')
-                except:
-                    date_val = raw_date
-                    
-                desc_val = row.get('description', '')
-                amount_val = abs(float(row.get('amount', 0)))  # HDFC statements show debit as negative, abs() fixes it.
-                category_val = get_category(desc_val)
+                parsed_date = pd.to_datetime(str(raw_date), errors='coerce').strftime('%Y-%m-%d')
+                description = str(row.get('description', '')).strip()
+                category = get_category(description)
+                
+                raw_amount = row.get('amount', 0)
+                amount = abs(float(str(raw_amount).replace(',', '').strip()))
                 
                 cursor.execute(
-                    "INSERT INTO transactions (date, description, amount, category) VALUES (?, ?, ?, ?)",
-                    (date_val, desc_val, amount_val, category_val)
+                    "INSERT INTO transactions (date, description, category, amount) VALUES (?, ?, ?, ?)",
+                    (parsed_date, description, category, amount)
                 )
-                
+            
             conn.commit()
-            conn.close()
             flash('Uploaded!', 'success')
-            
         except Exception as e:
-            flash(f'Error: {str(e)}', 'danger')
-            
-        return redirect(url_for('home'))
+            flash('Error processing file', 'danger')
+        finally:
+            conn.close()
+            if os.path.exists(file_path):
+                os.remove(file_path)
+    else:
+        conn.close()
+        flash('Invalid file format', 'danger')
+        
+    return redirect(url_for('home'))
+
+@app.route('/export-pdf')
+def export_pdf():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT date, description, category, amount FROM transactions ORDER BY date DESC")
+    rows = cursor.fetchall()
+    
+    cursor.execute("SELECT SUM(amount) FROM transactions")
+    total_spent = cursor.fetchone()[0] or 0.0
+    conn.close()
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], fontSize=18, spaceAfter=15, textColor=colors.HexColor('#dc3545'))
+    normal_style = styles['Normal']
+    
+    story.append(Paragraph("UPI Spending Report", title_style))
+    story.append(Paragraph(f"Total Spent: ₹{total_spent:,.2f}", normal_style))
+    story.append(Spacer(1, 15))
+    
+    table_data = [["Date", "Description", "Category", "Amount"]]
+    for r in rows:
+        table_data.append([r[0], r[1][:30], r[2], f"₹{r[3]:,.2f}"])
+        
+    t = Table(table_data, colWidths=[85, 215, 100, 100])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#dc3545')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#F7F9FC')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+    ]))
+    
+    story.append(t)
+    doc.build(story)
+    
+    buffer.seek(0)
+    pdf_bytes = buffer.read()
+    buffer.close()
+    
+    response = make_response(pdf_bytes)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = 'attachment; filename=Report.pdf'
+    return response
 
 @app.route('/clear-data', methods=['POST'])
 def clear_data():
@@ -137,46 +200,6 @@ def clear_data():
     flash('Cleared.', 'success')
     return redirect(url_for('home'))
 
-@app.route('/export-pdf')
-def export_pdf():
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT SUM(amount), COUNT(id) FROM transactions")
-    stats = cursor.fetchone()
-    
-    if not stats or stats[1] == 0:
-        conn.close()
-        flash('No data to export!', 'danger')
-        return redirect(url_for('home'))
-        
-    cursor.execute("SELECT category, SUM(amount) FROM transactions GROUP BY category")
-    category_data = cursor.fetchall()
-    conn.close()
-    
-    buffer = io.BytesIO()
-    p = pdf_canvas.Canvas(buffer, pagesize=A4)
-    
-    p.setFont("Helvetica-Bold", 18)
-    p.drawString(200, 800, "UPI Spending Report")
-    
-    p.setFont("Helvetica", 12)
-    p.drawString(50, 760, f"Total Spent: Rs. {stats[0]:.2f}")
-    p.drawString(50, 740, f"Total Transactions: {stats[1]}")
-    
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(50, 700, "Category Breakdown:")
-    
-    p.setFont("Helvetica", 12)
-    y = 680
-    for row in category_data:
-        p.drawString(70, y, f"{row[0]}: Rs. {row[1]:.2f}")
-        y -= 20
-        
-    p.save()
-    buffer.seek(0)
-    
-    return send_file(buffer, as_attachment=True, download_name='spending_report.pdf', mimetype='application/pdf')
-
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True)
+    app.run(debug=True, port=5000)
