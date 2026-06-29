@@ -46,14 +46,26 @@ def init_db():
     conn.commit()
     conn.close()
 
+init_db()
+
 @app.route('/')
 def home():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     
     cursor.execute("SELECT budget_limit FROM settings WHERE id = 1")
-    budget_limit = cursor.fetchone()[0]
+    row = cursor.fetchone()
     
+    if row:
+        budget_limit = row[0]
+    else:
+        budget_limit = 25000
+        cursor.execute(
+            "INSERT INTO settings (id, budget_limit) VALUES (1, ?)",
+            (budget_limit,)
+        )
+        conn.commit()
+        
     cursor.execute("SELECT SUM(amount), COUNT(id) FROM transactions")
     stats = cursor.fetchone()
     total_spent = stats[0] if stats[0] else 0.0
@@ -89,7 +101,6 @@ def upload_file():
     
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
-    # Commit the budget settings update first
     cursor.execute("UPDATE settings SET budget_limit = ? WHERE id = 1", (budget_limit,))
     conn.commit()
     
@@ -105,7 +116,8 @@ def upload_file():
         return redirect(url_for('home'))
         
     if file and file.filename.endswith('.csv'):
-        file_path = file.filename
+        os.makedirs("uploads", exist_ok=True)
+        file_path = os.path.join("uploads", file.filename)
         file.save(file_path)
         
         try:
@@ -129,6 +141,7 @@ def upload_file():
             conn.commit()
             flash('Uploaded!', 'success')
         except Exception as e:
+            print(e)
             flash('Error processing file', 'danger')
         finally:
             conn.close()
@@ -200,6 +213,8 @@ def clear_data():
     flash('Cleared.', 'success')
     return redirect(url_for('home'))
 
-if __name__ == '__main__':
-    init_db()
-    app.run(debug=True, port=5000)
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000))
+    )
